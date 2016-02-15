@@ -5,11 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"github.com/PuerkitoBio/goquery"
-	"github.com/valyala/fasthttp"
 	"golang.org/x/net/html"
 	"log"
 	"os"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -29,7 +27,7 @@ func main() {
 
 type ParserSelection goquery.Selection
 
-func (s *ParserSelection) OuterHtml() (ret string, e error) {
+func (s *ParserSelection) OuterHtml() (ret *string, e error) {
 	// Since there is no .outerHtml, the HTML content must be re-created from
 	// the node using html.Render
 	var buf bytes.Buffer
@@ -37,11 +35,12 @@ func (s *ParserSelection) OuterHtml() (ret string, e error) {
 		c := s.Nodes[0]
 		e = html.Render(&buf, c)
 		if e != nil {
-			return
+			return nil, e
 		}
-		ret = buf.String()
+		tmp := buf.String()
+		ret = &tmp
 	}
-	return
+	return ret, e
 }
 
 func ParseDate(datefield *goquery.Selection) time.Time {
@@ -73,46 +72,18 @@ func ParseDom(doc *goquery.Document) {
 	}
 }
 
-func NewFastHttpDocument(url string) (*goquery.Document, error) {
-	// copy of NewDocument function but using fasthttp package
-	GETstart := time.Now()
-	statusCode, body, e := fasthttp.Get(nil, url)
-	fmt.Printf("Actual GET duration: ")
-	fmt.Println(time.Since(GETstart))
-	if e != nil {
-		return nil, e
-	}
-
-	if statusCode != 200 {
-		log.Fatal("Request returned with code: ", strconv.Itoa(statusCode))
-	}
-	// need an io.reader interface hence bytes.NewBuffer
-	return goquery.NewDocumentFromReader(bytes.NewBuffer(body))
-}
-
 func search(term string) {
 	// want the div.talks and nav.pagination within "div#content div.container div.main"
 	// in div.talks want the div.talk-public data-id attribute
 
 	startslow := time.Now()
-	fmt.Println("Downloading slow...")
-	doc, err := goquery.NewDocument("https://speakerdeck.com/search?utf8=%E2%9C%93&q=" + term)
+	queryURL := "https://speakerdeck.com/search?utf8=%E2%9C%93&q=" + term
+	doc, err := goquery.NewDocument(queryURL)
 	if err != nil {
 		log.Fatal(err)
 	}
-	fmt.Printf("Downloaded in %s\n", time.Since(startslow))
-
-	start := time.Now()
-	fmt.Println("Downloading fast...")
-	doc, err = NewFastHttpDocument("https://speakerdeck.com/search?utf8=%E2%9C%93&q=" + term)
-	if err != nil {
-		log.Fatal(err)
-	}
-	fmt.Printf("Downloaded in %s\n", time.Since(start))
-
-	fmt.Println(". Parsing...") // too fast to be worth parsing
+	fmt.Printf("Downloaded %s in %s\n", queryURL, time.Since(startslow))
 	ParseDom(doc)
-	fmt.Println("Parsed...")
 
 	// print out the number of pages after parsing
 	// fmt.Printf("%s\n", string(doc))
