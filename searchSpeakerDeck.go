@@ -10,15 +10,20 @@ import (
 	"net/url"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
 
 var talks TalksInfo
 
+var search_term string = ""
+
 var page_count_selector string = "nav.pagination span.last a"
 var talk_selector string = "div.talks div.talk.public"
 var date_selector string = "div.talks div.talk.public div.talk-listing-meta p.date"
+
+var first_page_switch bool = true
 
 func main() {
 	if len(os.Args) < 2 {
@@ -26,8 +31,8 @@ func main() {
 		fmt.Printf("%s", err)
 		os.Exit(1)
 	}
-	search_term := strings.Join(os.Args[1:], " ")
-	search(search_term)
+	search_term = strings.Join(os.Args[1:], " ")
+	search(1)
 	// everything happens until...
 	sort.Sort(ByDate(talks.Talks))
 }
@@ -80,8 +85,8 @@ func (a ByDate) Len() int           { return len(a) }
 func (a ByDate) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
 func (a ByDate) Less(i, j int) bool { return a[i].Date.Before(a[j].Date) }
 
-// will output a Talk type struct
-func ParseTalk(talk_el ParserSelection, talknode *html.Node) Talk {
+// will add a Talk struct to the slice of them in the talks variable's Talks field
+func ParseTalk(talk_el ParserSelection, talknode *html.Node) {
 	date_str := strings.TrimSuffix(strings.TrimSpace(talknode.Data), " by")
 	fmt.Println(date_str)
 	fmt.Printf("Text node content: %s\n", date_str)
@@ -89,7 +94,7 @@ func ParseTalk(talk_el ParserSelection, talknode *html.Node) Talk {
 		Date: ParseDate(date_str),
 		Html: talk_el.OuterHtml(),
 	})
-	return talk
+	talks.Talks = append(talks.Talks, talk)
 }
 
 func ParseDom(doc *goquery.Document) {
@@ -103,7 +108,19 @@ func ParseDom(doc *goquery.Document) {
 	}
 	qparsed, _ := url.ParseQuery(u.RawQuery)
 	page_count := qparsed["page"][0]
-	fmt.Println(page_count)
+	n_pages, err := strconv.Atoi(page_count)
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Printf("Fire off the rest of the %s now\n", page_count)
+	// fire off all the other multiple page parsers now, unless this is the first page
+	if first_page_switch {
+		first_page_switch = false
+		for i := 2; i <= n_pages; i++ {
+			fmt.Printf("Recursion %d...\n", i)
+			//			search(i)
+		}
+	}
 	talks := doc.Find(talk_selector)
 	talks.Each(func(i int, talk_el *goquery.Selection) {
 		for _, talknode := range talk_el.Find(date_selector).Contents().Nodes {
@@ -124,19 +141,25 @@ func ParseDom(doc *goquery.Document) {
 	*/
 }
 
-func search(term string) {
+func getURL(page int) string {
+	if page < 2 {
+		return "https://speakerdeck.com/search?utf8=%E2%9C%93&q=" + search_term
+	}
+	return "https://speakerdeck.com/search?page=" + strconv.Itoa(page) + "&q=" + search_term + "&utf8=%E2%9C%93"
+}
+
+func search(page int) {
 	// want the div.talks and nav.pagination within "div#content div.container div.main"
 	// in div.talks want the div.talk-public data-id attribute
 
 	start := time.Now()
-	queryURL := "https://speakerdeck.com/search?utf8=%E2%9C%93&q=" + term
+	queryURL := getURL(page)
 	doc, err := goquery.NewDocument(queryURL)
 	if err != nil {
 		log.Fatal(err)
 	}
 	fmt.Printf("Downloaded %s in %s\n", queryURL, time.Since(start))
 	ParseDom(doc) // now have first page of slides&dates & total page count
-
 	// print out the number of pages after parsing
 	// fmt.Printf("%s\n", string(doc))
 }
