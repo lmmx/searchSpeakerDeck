@@ -15,6 +15,9 @@ import (
 	"time"
 )
 
+var resc chan bool = make(chan bool)
+var initialise chan int = make(chan int)
+
 var talks TalksInfo
 
 var search_term string = ""
@@ -35,6 +38,32 @@ func main() {
 	search(1)
 	// everything happens until...
 	sort.Sort(ByDate(talks.Talks))
+
+	var tocomplete int
+
+	for init := 0; init < 1; init++ {
+		select {
+		case tocomplete = <-initialise:
+			fmt.Println("Initialising next %d pages", tocomplete-1)
+		}
+	}
+
+	// unsure if it should look like this:
+	// tocomplete := <-initialise
+
+	for complete := 1; complete < tocomplete; complete++ {
+		select {
+		case res := <-resc:
+			if res {
+				fmt.Println("%d completed", complete+1)
+			}
+			/*
+				case err := <-errc:
+				fmt.Println(err)
+			*/
+		}
+	}
+	fmt.Println("All done!")
 }
 
 // the following DOM parsing section is adapted from a standalone script I wrote
@@ -98,24 +127,26 @@ func ParseTalk(talk_el ParserSelection, talknode *html.Node) {
 }
 
 func ParseDom(doc *goquery.Document) {
-	last_page_url := doc.Find(page_count_selector).AttrOr("href", "")
-	if last_page_url == "" {
-		log.Fatal("No URL returned")
-	}
-	u, err := url.Parse(last_page_url)
-	if err != nil {
-		log.Fatal(err)
-	}
-	qparsed, _ := url.ParseQuery(u.RawQuery)
-	page_count := qparsed["page"][0]
-	n_pages, err := strconv.Atoi(page_count)
-	if err != nil {
-		log.Fatal(err)
-	}
-	fmt.Printf("Fire off the rest of the %s now\n", page_count)
-	// fire off all the other multiple page parsers now, unless this is the first page
 	if first_page_switch {
 		first_page_switch = false
+		last_page_url := doc.Find(page_count_selector).AttrOr("href", "")
+		if last_page_url == "" {
+			log.Fatal("No URL returned")
+		}
+		u, err := url.Parse(last_page_url)
+		if err != nil {
+			log.Fatal(err)
+		}
+		qparsed, _ := url.ParseQuery(u.RawQuery)
+		page_count := qparsed["page"][0]
+		n_pages, err := strconv.Atoi(page_count)
+		if err != nil {
+			log.Fatal(err)
+		}
+		fmt.Printf("Fire off the rest of the %s now\n", page_count)
+		// unblock the second channel in main with a true bool
+		initialise <- n_pages
+		// fire off all the other multiple page parsers now
 		for i := 2; i <= n_pages; i++ {
 			fmt.Printf("Recursion %d...\n", i)
 			//			search(i)
@@ -132,6 +163,7 @@ func ParseDom(doc *goquery.Document) {
 			}
 		}
 	})
+	resc <- true
 	// this will return the TalksInfo struct
 	/*
 		for _, talk_date := range talk_dates {
