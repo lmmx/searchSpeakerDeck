@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"github.com/PuerkitoBio/goquery"
 	"golang.org/x/net/html"
 	"log"
@@ -19,6 +20,7 @@ var l *log.Logger = log.New(os.Stderr, "", 0)
 // Slide Deck limit of 50 pages:
 var pagination_ltd bool = true
 var pagination_limit int = 50
+var print_first_n int = 2 // print first 2 to STDOUT
 
 var initialise chan int = make(chan int, 1)
 var resc chan []Talk = make(chan []Talk, 1) // buffer size = no. pages
@@ -75,7 +77,11 @@ func main() {
 
 	// everything happens until...
 	sort.Sort(ByDate(talks.Talks))
-
+	for el_n, el := range talks.Talks {
+		if el_n < print_first_n {
+			fmt.Println(el.Html)
+		}
+	}
 	l.Printf("FINISHED: %d pages, %d talks.\n", talks.PageCount, talks.TalkCount)
 
 	/*
@@ -115,6 +121,8 @@ func ParseDate(datefield string) time.Time {
 }
 
 type Talk struct {
+	//AuthorName string
+	//AuthorUser string
 	Date time.Time
 	Html string
 }
@@ -131,14 +139,19 @@ type ByDate []Talk
 
 func (a ByDate) Len() int           { return len(a) }
 func (a ByDate) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
-func (a ByDate) Less(i, j int) bool { return a[i].Date.Before(a[j].Date) }
+func (a ByDate) Less(i, j int) bool { return !a[i].Date.Before(a[j].Date) }
 
 // will add a Talk struct to the slice of them in the talks variable's Talks field
 func ParseTalk(talk_el ParserSelection, talknode *html.Node) Talk {
 	date_str := strings.TrimSuffix(strings.TrimSpace(talknode.Data), " by")
+	//	auth_node := talk_el.Find(date_selector + " a")
+	//	auth_str := auth_node.Nodes[0].Data
+	//	auth_user := auth_node.AttrOr("href", "")
 	// l.Println(date_str)
 	// l.Printf("Text node content: %s -- ", date_str)
 	talk := (Talk{
+		//AuthorName: auth_str,
+		//AuthorUser: auth_user,
 		Date: ParseDate(date_str),
 		Html: talk_el.OuterHtml(),
 	})
