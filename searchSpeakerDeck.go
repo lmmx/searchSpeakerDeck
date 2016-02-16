@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"errors"
-	"fmt"
 	"github.com/PuerkitoBio/goquery"
 	"golang.org/x/net/html"
 	"log"
@@ -15,8 +14,9 @@ import (
 	"time"
 )
 
-var resc chan bool = make(chan bool)
-var initialise chan int = make(chan int)
+var l *log.Logger = log.New(os.Stderr, "", 0)
+
+var initialise chan int = make(chan int, 1)
 
 var talks TalksInfo
 
@@ -31,39 +31,41 @@ var first_page_switch bool = true
 func main() {
 	if len(os.Args) < 2 {
 		err := errors.New("Error: No search term provided")
-		fmt.Printf("%s", err)
+		l.Printf("%s", err)
 		os.Exit(1)
 	}
 	search_term = strings.Join(os.Args[1:], " ")
-	search(1)
-	// everything happens until...
-	sort.Sort(ByDate(talks.Talks))
-
+	search(1) // only used to get the number of pages thus the channel size
+	l.Println("Searched...")
 	var tocomplete int
-
+	l.Println("Waiting...")
 	for init := 0; init < 1; init++ {
 		select {
 		case tocomplete = <-initialise:
-			fmt.Println("Initialising next %d pages", tocomplete-1)
+			l.Printf("Initialising all %d pages\n", tocomplete)
 		}
 	}
 
-	// unsure if it should look like this:
-	// tocomplete := <-initialise
+	resc := make(chan bool, tocomplete) // buffer size = no. pages
 
 	for complete := 1; complete < tocomplete; complete++ {
 		select {
 		case res := <-resc:
 			if res {
-				fmt.Println("%d completed", complete+1)
+				l.Println("%d completed", complete+1)
 			}
 			/*
 				case err := <-errc:
-				fmt.Println(err)
+				l.Println(err)
 			*/
 		}
 	}
-	fmt.Println("All done!")
+
+	// everything happens until...
+	sort.Sort(ByDate(talks.Talks))
+	l.Println("Sorted...")
+
+	l.Println("All done!")
 }
 
 // the following DOM parsing section is adapted from a standalone script I wrote
@@ -91,7 +93,7 @@ func ParseDate(datefield string) time.Time {
 	if err != nil {
 		log.Fatal(err)
 	}
-	// fmt.Printf("Parsed date: %s\n", t)
+	// l.Printf("Parsed date: %s\n", t)
 	return t
 }
 
@@ -117,8 +119,8 @@ func (a ByDate) Less(i, j int) bool { return a[i].Date.Before(a[j].Date) }
 // will add a Talk struct to the slice of them in the talks variable's Talks field
 func ParseTalk(talk_el ParserSelection, talknode *html.Node) {
 	date_str := strings.TrimSuffix(strings.TrimSpace(talknode.Data), " by")
-	fmt.Println(date_str)
-	fmt.Printf("Text node content: %s\n", date_str)
+	l.Println(date_str)
+	l.Printf("Text node content: %s -- ", date_str)
 	talk := (Talk{
 		Date: ParseDate(date_str),
 		Html: talk_el.OuterHtml(),
@@ -143,15 +145,21 @@ func ParseDom(doc *goquery.Document) {
 		if err != nil {
 			log.Fatal(err)
 		}
-		fmt.Printf("Fire off the rest of the %s now\n", page_count)
+		l.Printf("Fire off the rest of the %s now\n", page_count)
 		// unblock the second channel in main with a true bool
+		l.Printf("initialising: %d...\n", n_pages)
 		initialise <- n_pages
+		l.Println("initialised")
 		// fire off all the other multiple page parsers now
-		for i := 2; i <= n_pages; i++ {
-			fmt.Printf("Recursion %d...\n", i)
-			//			search(i)
-		}
+		/*
+			for i := 2; i <= n_pages; i++ {
+				l.Printf("Recursion %d...\n", i)
+				//			search(i)
+			}
+		*/
+		return
 	}
+	l.Println("Testing...")
 	talks := doc.Find(talk_selector)
 	talks.Each(func(i int, talk_el *goquery.Selection) {
 		for _, talknode := range talk_el.Find(date_selector).Contents().Nodes {
@@ -163,11 +171,13 @@ func ParseDom(doc *goquery.Document) {
 			}
 		}
 	})
-	resc <- true
+	l.Println("Testing. . . .")
+	// resc <- true
+	l.Println("Um.. testing?")
 	// this will return the TalksInfo struct
 	/*
 		for _, talk_date := range talk_dates {
-			fmt.Printf(talk_date)
+			l.Printf(talk_date)
 			// sort the dates after all pages have been parsed...
 		}
 	*/
@@ -190,8 +200,9 @@ func search(page int) {
 	if err != nil {
 		log.Fatal(err)
 	}
-	fmt.Printf("Downloaded %s in %s\n", queryURL, time.Since(start))
+	l.Printf("Downloaded %s in %s\n", queryURL, time.Since(start))
 	ParseDom(doc) // now have first page of slides&dates & total page count
 	// print out the number of pages after parsing
-	// fmt.Printf("%s\n", string(doc))
+	// l.Printf("%s\n", string(doc))
+	l.Println("End of search...")
 }
