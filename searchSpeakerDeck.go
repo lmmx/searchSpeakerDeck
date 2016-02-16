@@ -16,8 +16,12 @@ import (
 
 var l *log.Logger = log.New(os.Stderr, "", 0)
 
-var initialise chan int = make(chan int, 1)
+// Slide Deck limit of 50 pages:
+var pagination_ltd bool = true
+var pagination_limit int = 50
 
+var initialise chan int = make(chan int, 1)
+var resc chan []Talk = make(chan []Talk, 1) // buffer size = no. pages
 var talks TalksInfo
 
 var search_term string = ""
@@ -44,23 +48,24 @@ func main() {
 		}
 	}
 
-	resc := make(chan bool, tocomplete) // buffer size = no. pages
+	// resc := make(chan []Talk, tocomplete) // buffer size = no. pages
 	l.Println("Channel made")
 	for i := 1; i <= tocomplete; i++ {
 		go func(pagenum int) {
 			l.Printf("Search #%d...\n", pagenum)
 			search(pagenum)
-			resc <- true
+			// steps into ParseDom which sends []Talk to resc
 		}(i)
 	}
 	//	close(resc)
 
-	for complete := 1; complete < tocomplete; complete++ {
+	for complete := 0; complete < tocomplete; complete++ {
 		select {
 		case res := <-resc:
-			if res {
-				l.Printf("%d completed", complete+1)
-			}
+			talks.Talks = append(talks.Talks, res...)
+			talks.PageCount++
+			talks.TalkCount = talks.TalkCount + len(res)
+			l.Printf("%d completed", complete+1)
 			/*
 				case err := <-errc:
 				l.Println(err)
@@ -71,7 +76,13 @@ func main() {
 	// everything happens until...
 	sort.Sort(ByDate(talks.Talks))
 
-	// l.Println("All done!")
+	l.Printf("FINISHED: %d pages, %d talks.\n", talks.PageCount, talks.TalkCount)
+
+	/*
+		To do:
+		 - add error handling to pick up those that failed (variable each time)
+		 - print the HTML from the pages to STDOUT
+	*/
 }
 
 // the following DOM parsing section is adapted from a standalone script I wrote
@@ -123,7 +134,7 @@ func (a ByDate) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
 func (a ByDate) Less(i, j int) bool { return a[i].Date.Before(a[j].Date) }
 
 // will add a Talk struct to the slice of them in the talks variable's Talks field
-func ParseTalk(talk_el ParserSelection, talknode *html.Node) {
+func ParseTalk(talk_el ParserSelection, talknode *html.Node) Talk {
 	date_str := strings.TrimSuffix(strings.TrimSpace(talknode.Data), " by")
 	// l.Println(date_str)
 	// l.Printf("Text node content: %s -- ", date_str)
@@ -131,7 +142,7 @@ func ParseTalk(talk_el ParserSelection, talknode *html.Node) {
 		Date: ParseDate(date_str),
 		Html: talk_el.OuterHtml(),
 	})
-	talks.Talks = append(talks.Talks, talk)
+	return talk
 }
 
 func ParseDom(doc *goquery.Document) {
@@ -151,24 +162,30 @@ func ParseDom(doc *goquery.Document) {
 		if err != nil {
 			//	l.Println(err)
 		}
-		l.Printf("Fire off the rest of the %s now\n", page_count)
+		// IMPORTANT! Pagination limited to 50 lol...
+		if pagination_ltd && n_pages > pagination_limit {
+			n_pages = pagination_limit
+		}
+		l.Printf("Fire off the rest ofe %s now\n", page_count)
 		// unblock the second channel in main with a true bool
 		l.Printf("initialising: %d...\n", n_pages)
 		initialise <- n_pages
 		// fire off all the other multiple page parsers now
 		return
 	}
-	talks := doc.Find(talk_selector)
-	talks.Each(func(i int, talk_el *goquery.Selection) {
+	talk_els := doc.Find(talk_selector)
+	var talksPerPage []Talk
+	talk_els.Each(func(i int, talk_el *goquery.Selection) {
 		for _, talknode := range talk_el.Find(date_selector).Contents().Nodes {
 			if talknode.Type == html.TextNode {
 				// mask the selection so Go doesn't grumble about types
 				mask := ParserSelection(*talk_el)
-				ParseTalk(mask, talknode)
+				talksPerPage = append(talksPerPage, ParseTalk(mask, talknode))
 				break // should be only 1 date node per talk
 			}
 		}
 	})
+	resc <- talksPerPage
 	// this will return the TalksInfo struct
 	/*
 		for _, talk_date := range talk_dates {
@@ -189,13 +206,13 @@ func search(page int) {
 	// want the div.talks and nav.pagination within "div#content div.container div.main"
 	// in div.talks want the div.talk-public data-id attribute
 
-	// start := time.Now()
+	start := time.Now()
 	queryURL := getURL(page)
 	doc, err := goquery.NewDocument(queryURL)
 	if err != nil {
 		// l.Println(err)
 	}
-	// l.Printf("Downloaded %s in %s\n", queryURL, time.Since(start))
+	l.Printf("Downloaded %s in %s\n", queryURL, time.Since(start))
 	ParseDom(doc) // now have first page of slides&dates & total page count
 	// print out the number of pages after parsing
 	// l.Printf("%s\n", string(doc))
